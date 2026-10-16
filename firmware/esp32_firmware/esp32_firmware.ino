@@ -137,6 +137,35 @@ void processCommand(String command) {
     return;
   }
 
+  // ----------------------------------------------------
+  // SIGNAL FROM CAMERA: Top Sponge Color Detected
+  // (Format: COLOR:RED, COLOR:GREEN, COLOR:BLUE)
+  // ----------------------------------------------------
+  if (command.startsWith("COLOR:")) {
+    String color = command.substring(6);
+    color.trim();
+    color.toUpperCase();
+
+    Serial.println("=========================================");
+    Serial.print(">>> SIGNAL FROM VISION: TOP COLOR IS: ");
+    Serial.println(color);
+    Serial.println("=========================================");
+
+    if (color == "RED") {
+      reply("OK: COLOR_RED_ACKNOWLEDGED");
+      // Later: friend can place hardcoded pick-and-place angles for RED here!
+    } else if (color == "GREEN") {
+      reply("OK: COLOR_GREEN_ACKNOWLEDGED");
+      // Later: friend can place hardcoded pick-and-place angles for GREEN here!
+    } else if (color == "BLUE") {
+      reply("OK: COLOR_BLUE_ACKNOWLEDGED");
+      // Later: friend can place hardcoded pick-and-place angles for BLUE here!
+    } else {
+      reply("ERROR: Unknown color signal");
+    }
+    return;
+  }
+
   if (command.startsWith("POSE:")) {
     int w, s, e, g;
     int count = sscanf(command.c_str() + 5, "%d,%d,%d,%d", &w, &s, &e, &g);

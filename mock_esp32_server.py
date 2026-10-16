@@ -1,13 +1,15 @@
 """
-Dual-Protocol ESP32 Mock Server, Live MJPEG Video Streamer & Interactive Web Dashboard.
+Dual-Protocol ESP32 Mock Server, Live Video Streamer & Color Signaling Dashboard.
 Listens on Port 5000:
-1. Web Browser (http://localhost:5000):
-   - Live OpenCV Webcam video feed with real-time Color & Bounding Box detection overlays.
-   - 2D/3D dual-view kinematics visualizer.
-   - One-Click 'Flash ESP32' button with live terminal log output.
-   - Interactive manual sliders and automated pick-and-place routines.
-2. Raw TCP Sockets:
-   - Compatible with ESP32 client code ('POSE:w,s,e,g', 'WAIST:...', etc.).
+1. Web Dashboard (http://localhost:5000):
+   - Real-time Top Sponge Color Detection Badge (RED / GREEN / BLUE).
+   - "Send Color Signal to ESP32" button ('COLOR:RED', 'COLOR:GREEN', 'COLOR:BLUE').
+   - Live Webcam Video Stream with ML Detection bounding boxes.
+   - 2D/3D dual-view Kinematics simulator.
+   - One-Click 'Flash ESP32 Firmware' button.
+2. Raw TCP Socket Protocol:
+   - Supports 'COLOR:RED', 'COLOR:GREEN', 'COLOR:BLUE'.
+   - Supports 'POSE:w,s,e,g', 'WAIST:...', 'SHOULDER:...', 'ELBOW:...', 'GRIPPER:...', 'HOME'.
 """
 
 import socket
@@ -23,21 +25,21 @@ import numpy as np
 
 from vision_detector import ColorDetector
 
-# Global shared camera frame
+# Global shared camera frame & detected top color
 latest_frame_jpeg = None
+current_top_color = "RED" # Default based on workspace stack
 camera_running = True
 camera_lock = threading.Lock()
 
 def camera_stream_worker():
-    global latest_frame_jpeg, camera_running
+    global latest_frame_jpeg, current_top_color, camera_running
     detector = ColorDetector(model_weights_path="/home/appu/intership/stress_math_lo/color_model.pth")
     cap = cv2.VideoCapture(0)
     
-    # If webcam 0 fails, we loop over the test desk photo
     test_photo_path = "/home/appu/intership/stress_math_lo/detection_test.jpg"
     fallback_img = cv2.imread(test_photo_path) if os.path.exists(test_photo_path) else None
 
-    print("[*] Camera stream thread started...")
+    print("[*] Vision & Camera streaming thread started...")
 
     while camera_running:
         frame = None
@@ -51,13 +53,18 @@ def camera_stream_worker():
 
         if frame is not None:
             try:
-                # Run real-time detection overlay
                 sponge, targets = detector.analyze_workspace(frame)
                 annotated = detector.draw_overlay(frame, sponge, targets)
                 
-                # Timestamp banner
-                cv2.putText(annotated, "LIVE STREAM - ROBOT VISION", (15, 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                with camera_lock:
+                    if sponge and "color" in sponge:
+                        current_top_color = sponge["color"]
+                
+                # Visual Banner on stream
+                banner_color = (0, 0, 255) if current_top_color == "RED" else (0, 255, 0) if current_top_color == "GREEN" else (255, 0, 0)
+                cv2.rectangle(annotated, (10, 10), (360, 48), (20, 20, 20), -1)
+                cv2.putText(annotated, f"TOP SPONGE: {current_top_color}", (20, 36),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.75, banner_color, 2)
                 
                 ret, jpeg = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
                 if ret:
@@ -66,27 +73,39 @@ def camera_stream_worker():
             except Exception as e:
                 pass
 
-        time.sleep(0.04) # ~25 FPS
+        time.sleep(0.04)
 
     if cap.isOpened():
         cap.release()
 
-# HTML5 Web Visualizer Template
+# HTML5 Web Visualizer & Dashboard
 WEB_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>4-DOF Robot Arm - Web Controller & Live Camera</title>
+<title>4-DOF Robot Arm - Web Controller & Color Signaler</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body { background: #0f172a; color: #f8fafc; padding: 20px; }
   .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
   .header h1 { font-size: 22px; color: #38bdf8; display: flex; align-items: center; gap: 10px; }
-  .header-actions { display: flex; gap: 10px; align-items: center; }
+  .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .badge { background: #10b981; color: #022c22; font-size: 12px; font-weight: bold; padding: 6px 12px; border-radius: 999px; }
-  .btn-flash { background: #eab308; color: #422006; border: none; padding: 7px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: all 0.2s; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .btn-flash { background: #eab308; color: #422006; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: all 0.2s; font-size: 13px; }
   .btn-flash:hover { background: #facc15; }
+  
+  /* Top Color Signal Banner */
+  .signal-banner { background: #1e293b; border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
+  .signal-info { display: flex; align-items: center; gap: 15px; }
+  .signal-label { font-size: 14px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+  .color-tag { font-size: 20px; font-weight: 800; padding: 6px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; }
+  .tag-red { background: #fee2e2; color: #b91c1c; border: 2px solid #ef4444; }
+  .tag-green { background: #dcfce7; color: #15803d; border: 2px solid #22c55e; }
+  .tag-blue { background: #dbeafe; color: #1d4ed8; border: 2px solid #3b82f6; }
+  .btn-signal { background: #0284c7; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
+  .btn-signal:hover { background: #0369a1; }
+
   .grid { display: grid; grid-template-columns: 1fr 360px; gap: 20px; }
   @media(max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
   .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 18px; margin-bottom: 20px; }
@@ -108,17 +127,28 @@ WEB_HTML = """<!DOCTYPE html>
   .btn-blue { background: #2563eb; } .btn-blue:hover { background: #3b82f6; }
   .btn-home { background: #0284c7; grid-column: span 2; } .btn-home:hover { background: #0ea5e9; }
   .console { background: #020617; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; color: #38bdf8; height: 140px; overflow-y: auto; margin-top: 10px; line-height: 1.5; }
-  .flash-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; z-index: 1000; }
-  .flash-box { background: #1e293b; border: 1px solid #475569; border-radius: 12px; padding: 24px; width: 90%; max-width: 500px; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1><span>🤖</span> 4-DOF Robot Arm - Web Controller & Visualizer</h1>
+  <h1><span>🤖</span> 4-DOF Robot Arm - Web Controller & Color Signaler</h1>
   <div class="header-actions">
     <button class="btn-flash" onclick="flashESP32()">⚡ Flash ESP32 Firmware</button>
-    <div class="badge">SERVER ON PORT 5000</div>
+    <div class="badge">TCP PORT 5000 ACTIVE</div>
+  </div>
+</div>
+
+<!-- Prominent Color Signal Banner -->
+<div class="signal-banner">
+  <div class="signal-info">
+    <div class="signal-label">Camera Vision Result:</div>
+    <div class="color-tag tag-red" id="topColorBadge">🔴 RED AT TOP</div>
+  </div>
+  <div style="display: flex; gap: 10px; align-items: center;">
+    <button class="btn-signal" onclick="sendColorSignal()">
+      <span>📡</span> Send Signal to ESP32: <span id="btnColorLabel" style="text-decoration: underline; font-weight: 800;">COLOR:RED</span>
+    </button>
   </div>
 </div>
 
@@ -182,8 +212,7 @@ WEB_HTML = """<!DOCTYPE html>
       <div class="card-title">Terminal & Flashing Output</div>
       <div class="console" id="logBox">
         <div>[System] Connected to ESP32 Server on Port 5000</div>
-        <div>[System] Calibrated angles loaded</div>
-        <div>[Vision] Real-time camera stream active</div>
+        <div>[Vision] Camera feed active - tracking top sponge</div>
       </div>
     </div>
   </div>
@@ -191,6 +220,7 @@ WEB_HTML = """<!DOCTYPE html>
 
 <script>
 let state = { waist: 90, shoulder: 90, elbow: 90, gripper: 120 };
+let currentTopColor = "RED";
 const canvas = document.getElementById("armCanvas");
 const ctx = canvas.getContext("2d");
 
@@ -208,6 +238,40 @@ function log(msg, color="#38bdf8") {
   el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
   box.appendChild(el);
   box.scrollTop = box.scrollHeight;
+}
+
+function updateColorBadge(color) {
+  currentTopColor = color.toUpperCase();
+  const badge = document.getElementById("topColorBadge");
+  const btnLabel = document.getElementById("btnColorLabel");
+
+  btnLabel.textContent = "COLOR:" + currentTopColor;
+
+  if (currentTopColor === "RED") {
+    badge.className = "color-tag tag-red";
+    badge.innerHTML = "🔴 RED AT TOP";
+  } else if (currentTopColor === "GREEN") {
+    badge.className = "color-tag tag-green";
+    badge.innerHTML = "🟢 GREEN AT TOP";
+  } else if (currentTopColor === "BLUE") {
+    badge.className = "color-tag tag-blue";
+    badge.innerHTML = "🔵 BLUE AT TOP";
+  }
+}
+
+async function sendColorSignal() {
+  log(`Broadcasting signal to ESP32: COLOR:${currentTopColor}...`, "#38bdf8");
+  try {
+    const res = await fetch("/api/send_color_signal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ color: currentTopColor })
+    });
+    const data = await res.json();
+    log(`>>> ESP32 Response: "${data.reply}"`, "#22c55e");
+  } catch(e) {
+    log("Error sending color signal: " + e, "#ef4444");
+  }
 }
 
 function sendPose() {
@@ -249,7 +313,7 @@ async function flashESP32() {
       log("✓ ESP32 Flashed Successfully!", "#22c55e");
       log(data.output, "#e2e8f0");
     } else {
-      log("✗ Flash failed: " + data.message, "#ef4444");
+      log("✗ Flash status: " + data.message, "#ef4444");
       if (data.output) log(data.output, "#ef4444");
     }
   } catch(err) {
@@ -257,14 +321,14 @@ async function flashESP32() {
   }
 }
 
-// Synchronize state with backend
+// Synchronize state & top detected color periodically
 setInterval(async () => {
   try {
     const res = await fetch("/api/state");
     const data = await res.json();
     if (data.waist !== undefined) {
       if (data.waist !== state.waist || data.shoulder !== state.shoulder || data.elbow !== state.elbow || data.gripper !== state.gripper) {
-        state = data;
+        state = { waist: data.waist, shoulder: data.shoulder, elbow: data.elbow, gripper: data.gripper };
         document.getElementById("waist").value = state.waist;
         document.getElementById("shoulder").value = state.shoulder;
         document.getElementById("elbow").value = state.elbow;
@@ -276,8 +340,11 @@ setInterval(async () => {
         draw();
       }
     }
+    if (data.top_color && data.top_color !== currentTopColor) {
+      updateColorBadge(data.top_color);
+    }
   } catch(e) {}
-}, 200);
+}, 250);
 
 function draw() {
   const W = canvas.width;
@@ -488,7 +555,6 @@ class DualServer:
             client_sock.sendall(header + body)
             client_sock.close()
         elif method == "GET" and path == "/video_feed":
-            # MJPEG video stream response header
             header = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n"
             client_sock.sendall(header.encode("utf-8"))
             try:
@@ -515,7 +581,25 @@ class DualServer:
                 client_sock.sendall(b"HTTP/1.1 404 Not Found\r\n\r\n")
             client_sock.close()
         elif method == "GET" and path == "/api/state":
-            body = json.dumps(self.angles).encode("utf-8")
+            resp_data = dict(self.angles)
+            resp_data["top_color"] = current_top_color
+            body = json.dumps(resp_data).encode("utf-8")
+            header = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode("utf-8")
+            client_sock.sendall(header + body)
+            client_sock.close()
+        elif method == "POST" and path == "/api/send_color_signal":
+            body_start = initial_data.find(b"\r\n\r\n") + 4
+            content = initial_data[body_start:].decode("utf-8", errors="ignore")
+            try:
+                data = json.loads(content)
+                color = data.get("color", current_top_color)
+            except:
+                color = current_top_color
+            
+            # Process command exactly as ESP32 does
+            reply = self.process_command(f"COLOR:{color}")
+            res = {"status": "ok", "color": color, "reply": reply}
+            body = json.dumps(res).encode("utf-8")
             header = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode("utf-8")
             client_sock.sendall(header + body)
             client_sock.close()
@@ -543,14 +627,12 @@ class DualServer:
             client_sock.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}")
             client_sock.close()
         elif method == "POST" and path == "/api/flash_esp32":
-            # Trigger compilation and upload via flash_esp32.sh
             try:
                 proc = subprocess.run(
                     ["arduino-cli", "compile", "--fqbn", "esp32:esp32:esp32", "firmware/esp32_firmware"],
                     capture_output=True, text=True, timeout=60, cwd="/home/appu/intership/stress_math_lo"
                 )
                 if proc.returncode == 0:
-                    # Look for port
                     port = None
                     for p in ["/dev/ttyUSB0", "/dev/ttyACM0"]:
                         if os.path.exists(p):
@@ -563,7 +645,7 @@ class DualServer:
                         )
                         res = {"status": "ok", "output": f"Compiled and uploaded to {port}!\n" + up.stdout}
                     else:
-                        res = {"status": "error", "message": "Firmware compiled cleanly, but no ESP32 USB port (/dev/ttyUSB*) detected. Please plug the ESP32 into a USB port!"}
+                        res = {"status": "error", "message": "Firmware compiled cleanly, but no ESP32 USB port detected. Please plug the ESP32 into a USB port!"}
                 else:
                     res = {"status": "error", "message": "Compilation failed", "output": proc.stderr}
             except Exception as ex:
@@ -601,6 +683,17 @@ class DualServer:
 
     def process_command(self, cmd):
         cmd = cmd.strip()
+        
+        # Color signal from camera vision:
+        if cmd.startswith("COLOR:"):
+            color = cmd[6:].strip().upper()
+            print("="*50)
+            print(f" [ESP32 SIGNAL] >>> SIGNAL FROM VISION: TOP COLOR IS: {color}")
+            print("="*50)
+            if color in ["RED", "GREEN", "BLUE"]:
+                return f"OK: COLOR_{color}_ACKNOWLEDGED"
+            return "ERROR: Unknown color signal"
+
         if cmd.startswith("POSE:"):
             try:
                 w, s, e, g = map(int, cmd[5:].split(","))
@@ -647,7 +740,6 @@ class DualServer:
             self.handle_tcp(client_sock, initial_data)
 
     def start(self):
-        # Start camera thread
         t_cam = threading.Thread(target=camera_stream_worker, daemon=True)
         t_cam.start()
 
@@ -657,7 +749,7 @@ class DualServer:
         self.server_socket.listen(10)
         self.running = True
 
-        print(f"\n[+] Dual Server LIVE with Real-Time Video on http://localhost:{self.port}!")
+        print(f"\n[+] Dual Server LIVE with Color Signaling on http://localhost:{self.port}!")
         
         try:
             while self.running:
