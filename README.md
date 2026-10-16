@@ -49,8 +49,12 @@ The system uses **OpenCV** and a custom **PyTorch Deep Learning CNN Model** to d
 4. **Gear Protection & Smooth Trajectory Interpolation**:
    - Smooth step interpolation prevents SG90 plastic gears from stripping and prevents high current spikes that cause ESP32 brownout resets.
 
-5. **2D/3D Multi-View Kinematics Visualizer**:
+5. **2D/3D Multi-View Kinematics Visualizer & Simulator**:
    - Visualizes table workspace reach ($X-Y$ top view) and arm elevation ($R-Z$ side view).
+   - Generates animated GIFs and multi-view dashboards (`color_sorting_simulation.gif`, `sorting_dashboard.png`).
+
+6. **One-Click ESP32 Firmware Flasher (`flash_esp32.sh`)**:
+   - Compiles and uploads firmware to the ESP32 with zero manual IDE setup.
 
 ---
 
@@ -65,21 +69,23 @@ The system uses **OpenCV** and a custom **PyTorch Deep Learning CNN Model** to d
 
 ---
 
-## Quick Start & Setup
+## Quick Start & Testing Guide
 
-### 1. Run Setup Script (One-Click)
+### 1. Run Setup Script (One-Click Environment Setup)
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-### 2. Start the Virtual Robot Arm Server
+### 2. Start the Virtual Robot Arm Server (Active by Default)
+If testing without the physical ESP32, start the mock server:
 ```bash
 python3 mock_esp32_server.py
 ```
+*(Runs on `0.0.0.0:5000` and emulates the exact ESP32 firmware).*
 
 ### 3. Run the Color Sorting Orchestrator
-To test with the workspace test image:
+To test end-to-end with the workspace test photo:
 ```bash
 python3 color_sorter_orchestrator.py
 ```
@@ -95,16 +101,47 @@ if orc.connect_robot():
 ```
 *(Press `s` to sort the detected object, `q` to quit).*
 
+### 4. Generate Animated Kinematics Simulation
+```bash
+python3 run_animated_simulation.py
+```
+Outputs `color_sorting_simulation.gif` and `sorting_dashboard.png`.
+
+### 5. Flash the Physical ESP32 (When Connected via USB)
+```bash
+chmod +x flash_esp32.sh
+./flash_esp32.sh
+```
+*(Automatically installs `ESP32Servo`, compiles the sketch, flashes the board, and displays the WiFi IP address in the serial monitor).*
+
 ---
 
-## File Overview
+## Manual TCP Testing Commands
+
+You can connect directly to the server via `nc` (netcat) or `telnet`:
+```bash
+nc localhost 5000
+```
+Then send any of the supported commands:
+- `POSE:90,90,90,120` (Sets all 4 servos: waist, shoulder, elbow, gripper)
+- `WAIST:105` (Rotates waist to 105°)
+- `GRIPPER:165` (Closes gripper claw)
+- `GRIPPER:120` (Opens gripper claw)
+- `HOME` (Returns arm to safe default upright pose)
+
+---
+
+## Project Repository Structure
 
 - `config.py`: Calibrated angles, link dimensions, safe limits, and TCP settings.
 - `mock_esp32_server.py`: Virtual TCP server emulating the ESP32.
 - `robot_client.py`: TCP client with smooth acceleration and pick-and-place routines.
 - `vision_detector.py`: Color detection and target circle tracking module.
 - `train_color_model.py`: PyTorch training script for color classification.
-- `color_model.pth`: Trained model weights.
+- `color_model.pth`: Trained ML model weights.
 - `color_sorter_orchestrator.py`: Master state machine orchestrating vision and arm movement.
 - `arm_visualizer.py`: 2D multi-view kinematics visualizer.
+- `run_animated_simulation.py`: Step-by-step trajectory animation generator.
+- `flash_esp32.sh`: One-click firmware compilation and flashing script.
+- `firmware/esp32_firmware/esp32_firmware.ino`: Arduino C++ firmware for the ESP32.
 - `setup.sh`: Automated dependency verification and environment setup.
